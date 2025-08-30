@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>债券价格计算器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            padding: 20px;
+            background-color: #f4f4f4;
+        }
+        h2 {
+            color: #333;
+        }
+        input, button {
+            padding: 8px;
+            margin: 8px 0;
+            width: 100%;
+            max-width: 500px;
+            box-sizing: border-box;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
+            text-align: center;
+        }
+        .error {
+            color: red;
+        }
+        .positive {
+            color: green;
+            font-weight: bold;
+        }
+        .negative {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h2>债券价格计算器</h2>
+    <div>
+        <label for="fileInput">上传债券数据文件（Excel 格式）：</label>
+        <input type="file" id="fileInput" accept=".xlsx" onchange="handleFileUpload(event)">
+        <br>
+        <button onclick="calculateBondsPrice()">计算价格并下载结果</button>
+    </div>
+    
+    <h3>计算结果</h3>
+    <table id="resultTable">
+        <thead>
+            <tr>
+                <th>Issuer</th>
+                <th>Yield</th>
+                <th>Coupon</th>
+                <th>Price</th>
+                <th>Maturity</th>
+                <th>计算价格</th>
+                <th>差值 (计算价格 - 实际价格)</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Results will go here -->
+        </tbody>
+    </table>
+    
+    <div class="error" id="errorMessage"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.1/xlsx.full.min.js"></script>
+    <script>
+        let bondsData = []; // Store the uploaded bonds data
+
+        // Function to handle file upload and parse the data
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const data = e.target.result;
+                    const workbook = XLSX.read(data, { type: 'binary' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet);
+
+                    bondsData = jsonData.map((row) => ({
+                        issuer: row.Issuer,
+                        yield: parseFloat(row.Yield),
+                        coupon: parseFloat(row.Coupon),
+                        price: parseFloat(row.Price),
+                        maturity: new Date(row.Maturity),
+                    }));
+
+                    displayResults();
+                };
+                reader.readAsBinaryString(file);
+            }
+        }
+
+        // Function to calculate bond price based on inputs
+        function calculatePrice(couponRate, yieldRate, faceValue, maturityDate) {
+            const currentDate = new Date();
+            const yearsToMaturity = (maturityDate - currentDate) / (1000 * 60 * 60 * 24 * 365);
+
+            if (isNaN(couponRate) || isNaN(yieldRate) || isNaN(faceValue) || isNaN(maturityDate)) {
+                return NaN; // Invalid input
+            }
+
+            // Calculate coupon payment
+            const couponPayment = couponRate * faceValue;
+            
+            // Calculate present value of coupon payments
+            let couponPV = 0;
+            for (let t = 1; t <= yearsToMaturity; t++) {
+                couponPV += couponPayment / Math.pow(1 + yieldRate, t);
+            }
+            
+            // Calculate present value of the face value (lump sum) at maturity
+            const faceValuePV = faceValue / Math.pow(1 + yieldRate, yearsToMaturity);
+
+            // Calculate bond price and divide by 10
+            return (couponPV + faceValuePV) / 10;
+        }
+
+        // Function to display results in the table
+        function displayResults() {
+            const resultTable = document.getElementById('resultTable').getElementsByTagName('tbody')[0];
+            resultTable.innerHTML = ''; // Clear previous results
+
+            bondsData.forEach((bond) => {
+                const bondPrice = calculatePrice(bond.coupon, bond.yield, 1000, bond.maturity);
+                const priceDifference = bondPrice - bond.price;
+                const diffClass = priceDifference > 0 ? 'positive' : 'negative';
+                
+                const newRow = resultTable.insertRow();
+                newRow.innerHTML = `
+                    <td>${bond.issuer}</td>
+                    <td>${(bond.yield * 100).toFixed(2)}%</td>
+                    <td>${(bond.coupon * 100).toFixed(2)}%</td>
+                    <td>$${bond.price.toFixed(2)}</td>
+                    <td>${bond.maturity.toLocaleDateString('en-US')}</td>
+                    <td>$${bondPrice.toFixed(2)}</td>
+                    <td class="${diffClass}">${priceDifference.toFixed(2)}</td>
+                `;
+            });
+        }
+
+        // Function to calculate price and enable Excel download
+        function calculateBondsPrice() {
+            if (bondsData.length === 0) {
+                document.getElementById('errorMessage').textContent = "请上传有效的债券数据文件！";
+                return;
+            }
+            document.getElementById('errorMessage').textContent = ''; // Clear error message
+
+            // Generate Excel with the results
+            const ws = XLSX.utils.json_to_sheet(bondsData.map((bond) => ({
+                Issuer: bond.issuer,
+                Yield: `${(bond.yield * 100).toFixed(2)}%`,
+                Coupon: `${(bond.coupon * 100).toFixed(2)}%`,
+                Price: `$${bond.price.toFixed(2)}`,
+                Maturity: bond.maturity.toLocaleDateString('en-US'),
+                CalculatedPrice: `$${calculatePrice(bond.coupon, bond.yield, 1000, bond.maturity).toFixed(2)}`,
+                PriceDifference: (calculatePrice(bond.coupon, bond.yield, 1000, bond.maturity) - bond.price).toFixed(2)
+            })));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Bond Prices");
+
+            // Create a download link for the generated Excel file
+            const excelFile = XLSX.write(wb, { bookType: 'xlsx', type: 'binary' });
+            const blob = new Blob([s2ab(excelFile)], { type: 'application/octet-stream' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = "bonds_calculated.xlsx";
+            link.click();
+        }
+
+        // Function to convert string to array buffer for Excel download
+        function s2ab(s) {
+            const buf = new ArrayBuffer(s.length);
+            const view = new Uint8Array(buf);
+            for (let i = 0; i !== s.length; ++i) view[i] = s.charCodeAt(i) & 0xFF;
+            return buf;
+        }
+    </script>
+</body>
+</html>
